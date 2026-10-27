@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Student Attendance</title>
+<style>
+:root{--bg:#f4f5fb;--card:#fff;--text:#1d1f2b;--muted:#6b7080;--line:#e3e5ef;--primary:#3f51b5;--green:#2e7d32;--yellow:#f9a825;--red:#c62828}
+@media (prefers-color-scheme:dark){:root{--bg:#14151c;--card:#1e2029;--text:#eceef6;--muted:#9aa0b4;--line:#2d303d;--primary:#8c9eff}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+main{max-width:640px;margin:0 auto;padding:16px 16px 90px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:10px}
+h1,h2,h3{margin:.2em 0}h2{font-size:1.05rem;margin:18px 0 8px}.muted{color:var(--muted);font-size:.9rem}
+.big{font-size:2.4rem;font-weight:700}.bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden;margin:8px 0}.bar>i{display:block;height:100%}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.chip{font-size:.75rem;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap}
+.warn{background:#c6282820;border:1px solid #c6282866;border-radius:12px;padding:12px;margin-bottom:12px}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line)}
+nav button{flex:1;padding:14px 4px;border:0;background:none;color:var(--muted);font-size:.85rem;cursor:pointer}nav button.on{color:var(--primary);font-weight:700}
+button.p{background:var(--primary);color:#fff;border:0;border-radius:10px;padding:12px 16px;font-size:1rem;cursor:pointer;width:100%}
+button.o{background:none;border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px 14px;cursor:pointer}
+input,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);font-size:1rem;margin:6px 0}
+.tabs{display:flex;gap:6px;margin-bottom:10px}.tabs button{flex:1}.tabs button.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.err{color:var(--red);margin:8px 0}.center{text-align:center;padding:40px 0}.hide{display:none}
+</style>
+</head>
+<body>
+<main id="login" class="hide">
+  <div class="center"><h1>Student Login</h1><p class="muted">AI-Enabled Attendance System</p></div>
+  <input id="email" type="email" placeholder="Email" autocomplete="username">
+  <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+  <div id="loginErr" class="err"></div>
+  <button class="p" id="loginBtn">Log in</button>
+</main>
+<main id="app" class="hide"><div id="content"></div></main>
+<nav id="nav" class="hide">
+  <button data-t="home">Home</button><button data-t="att">Attendance</button>
+  <button data-t="sched">Schedule</button><button data-t="me">Profile</button>
+</nav>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let tokens = JSON.parse(localStorage.getItem('tokens') || 'null');
+let tab = 'home', range = 'today', hist = null, subjects = [];
+
+const hdr = () => ({'Content-Type':'application/json', ...(tokens ? {Authorization:'Bearer ' + tokens.access_token} : {})});
+async function post(path, body) {
+  return fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+}
+async function refresh() {
+  if (!tokens) return false;
+  const r = await post('/auth/refresh', {refresh_token: tokens.refresh_token});
+  if (!r.ok) return false;
+  tokens = await r.json(); localStorage.setItem('tokens', JSON.stringify(tokens)); return true;
+}
+function logout() { tokens = null; localStorage.removeItem('tokens'); show(); }
+async function api(path, q) {
+  const url = path + (q && Object.keys(q).length ? '?' + new URLSearchParams(q) : '');
+  let r = await fetch(url, {headers: hdr()});
+  if (r.status === 401) {
+    if (await refresh()) r = await fetch(url, {headers: hdr()});
+    if (r.status === 401) { logout(); throw new Error('Your session expired. Please log in again.'); }
+  }
+  if (!r.ok) {
+    let m = 'Something went wrong. Please try again.';
+    try { const d = await r.json(); if (typeof d.detail === 'string') m = d.detail; } catch (e) {}
+    throw new Error(m);
+  }
+  return r.json();
+}
+
+const COLORS = {HEALTHY:'var(--green)', WARNING:'var(--yellow)', LOW:'var(--red)', NO_DATA:'var(--muted)'};
+const LEVELTXT = {HEALTHY:'Healthy', WARNING:'Warning', LOW:'Low', NO_DATA:'No data yet'};
+const CHIP = {PRESENT:['Present ✓','--green'], ABSENT:['Absent','--red'], CANCELLED:['Cancelled','--muted'], PENDING:['Pending','--yellow'], UPCOMING:['Upcoming','--primary']};
+const pct = s => s.percentage == null ? '--' : s.percentage.toFixed(1) + '%';
+const chip = st => { const [t, c] = CHIP[st] || CHIP.UPCOMING; return `<span class="chip" style="color:var(${c});background:color-mix(in srgb,var(${c}) 15%,transparent)">${t}</span>`; };
+const fmtDate = d => new Date(d + 'T00:00:00').toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
+const bar = s => `<div class="bar"><i style="width:${Math.min(100, s.percentage || 0)}%;background:${COLORS[s.level]}"></i></div>`;
+const tile = (s, withDate) => `<div class="card"><div class="row"><div><b>${esc(s.subject_name)}</b><div class="muted">${withDate ? fmtDate(s.date) + ' · ' + s.start_time : s.start_time + ' - ' + s.end_time}<br>${esc(s.room || 'Room TBA')} · ${esc(s.teacher_name)}</div></div>${chip(s.status)}</div></div>`;
+const empty = t => `<div class="center muted">${esc(t)}</div>`;
+const warn = m => m ? `<div class="warn">⚠️ ${esc(m)}</div>` : '';
+
+const views = {
+  async home() {
+    const h = await api('/students/me/home'), n = h.next_class;
+    return `<h1>Hello ${esc(h.full_name.split(' ')[0])} 👋</h1><div class="muted">${esc(h.roll_no)}${h.batch ? ' · ' + esc(h.batch) : ''}</div><br>${warn(h.warning_message)}
+      <div class="card"><div class="muted">Overall Attendance</div><div class="big" style="color:${COLORS[h.overall.level]}">${pct(h.overall)}</div>${bar(h.overall)}<div class="muted">Present ${h.overall.present} of ${h.overall.total} classes</div></div>
+      ${n ? `<h2>Next class</h2><div class="card"><b>${esc(n.subject_name)}</b><div class="muted">${fmtDate(n.date)} · ${n.start_time} - ${n.end_time} · ${esc(n.room || 'Room TBA')}</div></div>` : ''}
+      <h2>Today's classes</h2>${h.todays_classes.map(s => tile(s)).join('') || empty('No classes today.')}
+      <h2>Recent attendance</h2>${h.recent.map(s => tile(s, true)).join('') || empty('No attendance recorded yet.')}`;
+  },
+  async att() {
+    const a = await api('/students/me/attendance'); subjects = a.subjects;
+    if (hist) return historyView();
+    return `${warn(a.warning_message)}<div class="card"><div class="muted">Overall attendance</div><div class="big" style="color:${COLORS[a.overall.level]}">${pct(a.overall)}</div>${bar(a.overall)}
+      <div class="muted">Present ${a.overall.present} of ${a.overall.total} · minimum required ${a.thresholds.min_required}%</div></div>
+      <h2>Subject-wise</h2>${a.subjects.map(s => `<div class="card" style="cursor:pointer" onclick="openHist(${s.subject_id})"><div class="row"><b>${esc(s.subject_name)}</b><b style="color:${COLORS[s.level]}">${pct(s)}</b></div>${bar(s)}<div class="muted">Present: ${s.present} &nbsp; Total: ${s.total} &nbsp;·&nbsp; ${LEVELTXT[s.level]}</div></div>`).join('') || empty('No subjects yet.')}
+      <button class="o" style="width:100%" onclick="openHist('')">View full attendance history</button>`;
+  },
+  async sched() {
+    const items = await api('/students/me/schedule', {range});
+    const tabs = ['today', 'tomorrow', 'week'].map(r => `<button class="o ${r === range ? 'on' : ''}" onclick="setRange('${r}')">${{today:'Today', tomorrow:'Tomorrow', week:'This week'}[r]}</button>`).join('');
+    let body = '', cur = '';
+    for (const s of items) {
+      if (range === 'week' && s.date !== cur) { cur = s.date; body += `<h2>${fmtDate(s.date).toUpperCase()}</h2>`; }
+      body += tile(s);
+    }
+    return `<div class="tabs">${tabs}</div>${body || empty('No classes in this period.')}`;
+  },
+  async me() {
+    const p = await api('/students/me');
+    const ini = p.full_name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+    return `<div class="center"><div style="width:88px;height:88px;border-radius:50%;background:var(--primary);color:#fff;font-size:2rem;display:inline-flex;align-items:center;justify-content:center">${esc(ini)}</div><h1>${esc(p.full_name)}</h1></div>
+      <div class="card"><div class="muted">Roll number</div>${esc(p.roll_no)}<hr style="border:0;border-top:1px solid var(--line)"><div class="muted">Email</div>${esc(p.email)}<hr style="border:0;border-top:1px solid var(--line)"><div class="muted">Batch</div>${esc(p.batch || 'Not assigned')}</div>
+      <button class="o" style="width:100%" onclick="if(confirm('Log out?'))logout()">Log out</button>`;
+  }
+};
+
+async function historyView() {
+  const q = {};
+  if (hist.subject) q.subject_id = hist.subject;
+  if (hist.status) q.status = hist.status;
+  const items = await api('/students/me/attendance/history', q);
+  const opts = ['<option value="">All subjects</option>'].concat(subjects.map(s => `<option value="${s.subject_id}" ${String(s.subject_id) === String(hist.subject) ? 'selected' : ''}>${esc(s.subject_name)}</option>`)).join('');
+  const st = ['', 'PRESENT', 'ABSENT'].map(v => `<option value="${v}" ${v === hist.status ? 'selected' : ''}>${{'':'All statuses', PRESENT:'Present', ABSENT:'Absent'}[v]}</option>`).join('');
+  return `<div class="row"><h1>Attendance history</h1><button class="o" onclick="hist=null;render()">Back</button></div>
+    <select onchange="hist.subject=this.value;render()">${opts}</select><select onchange="hist.status=this.value;render()">${st}</select>
+    ${items.map(s => tile(s, true)).join('') || empty('No attendance matches these filters.')}`;
+}
+window.openHist = id => { hist = {subject: id, status: ''}; render(); };
+window.setRange = r => { range = r; render(); };
+
+async function render() {
+  const c = $('#content');
+  c.innerHTML = '<div class="center muted">Loading…</div>';
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+  try { c.innerHTML = await views[tab](); }
+  catch (e) {
+    if (!tokens) return;
+    const msg = e instanceof TypeError ? 'Cannot reach the server. Check your connection.' : e.message;
+    c.innerHTML = `<div class="center"><p>${esc(msg)}</p><button class="p" onclick="render()">Retry</button></div>`;
+  }
+}
+function show() {
+  $('#login').classList.toggle('hide', !!tokens);
+  $('#app').classList.toggle('hide', !tokens);
+  $('#nav').classList.toggle('hide', !tokens);
+  if (tokens) render();
+}
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b.dataset.t; hist = null; render(); });
+async function doLogin() {
+  const err = $('#loginErr'); err.textContent = '';
+  if (!$('#email').value.trim() || !$('#password').value) { err.textContent = 'Enter your email and password.'; return; }
+  $('#loginBtn').disabled = true;
+  try {
+    const r = await post('/auth/login', {email: $('#email').value.trim(), password: $('#password').value});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { err.textContent = typeof d.detail === 'string' ? d.detail : 'Please check the details you entered.'; return; }
+    if (d.role !== 'STUDENT') { err.textContent = 'This app is for students only.'; return; }
+    tokens = d; localStorage.setItem('tokens', JSON.stringify(d)); $('#password').value = ''; tab = 'home'; show();
+  } catch (e) { err.textContent = 'Cannot reach the server. Check your connection.'; }
+  finally { $('#loginBtn').disabled = false; }
+}
+$('#loginBtn').onclick = doLogin;
+$('#password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+show();
+</script>
+</body>
+</html>
