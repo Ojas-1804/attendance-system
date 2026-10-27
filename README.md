@@ -9,12 +9,12 @@ the teacher reviews and finalizes, and students see their attendance in their ow
 
 | Phase | Description | Status |
 |---|---|---|
-| 1 | Foundation: backend, DB, auth, roles | Done (Mid-term 1) |
-| 2 | Student system (API + Flutter student app) | Done (Mid-term 1) |
-| 3 | Teacher system | Planned (Sem 4) |
-| 4 | AI engine | Planned (Sem 5) |
-| 5-6 | Manual review, finalize, student sync | Planned (Sem 6) |
-| 7-8 | Admin dashboard, production hardening | Planned (Sem 7) |
+| 1 | Foundation: backend, DB, auth, roles |
+| 2 | Student system (API + Flutter student app) |
+| 3 | Teacher system | Planned |
+| 4 | AI engine | Planned |
+| 5-6 | Manual review, finalize, student sync | Planned |
+| 7-8 | Admin dashboard, production hardening | Planned |
 
 ## Repository layout
 ```
