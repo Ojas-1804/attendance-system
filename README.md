@@ -9,8 +9,8 @@ the teacher reviews and finalizes, and students see their attendance in their ow
 
 | Phase | Description | Status |
 |---|---|---|
-| 1 | Foundation: backend, DB, auth, roles |
-| 2 | Student system (API + Flutter student app) |
+| 1 | Foundation: backend, DB, auth, roles | Done |
+| 2 | Student system (API + Flutter student app) | Done |
 | 3 | Teacher system | Planned |
 | 4 | AI engine | Planned |
 | 5-6 | Manual review, finalize, student sync | Planned |
